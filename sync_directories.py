@@ -3,56 +3,74 @@ import sys
 import time
 import filecmp
 import shutil
+import click
 
 
-def synchronize_folders(source_dir, replica_dir, log_file):
-    try:
-        compare = filecmp.dircmp(source_dir, replica_dir)
-        for name in compare.left_only:
-            src_path = os.path.join(source_dir, name)
-            dst_path = os.path.join(replica_dir, name)
+class FolderSynchronizer:
+    def __init__(self, source, destination, log, interval):
+        self.source_dir = source
+        self.replica_dir = destination
+        self.log_file = log
+        self.interval = interval
+
+    def synchronize(self):
+        try:
+            click.echo("---------Comparing source and destination-----------")
+            dcmp = filecmp.dircmp(self.source_dir, self.replica_dir)
+            if not dcmp.diff_files:
+                click.echo("No changes detected!")
+            self._copy_new_files(dcmp.left_only)
+            self._remove_extra_files(dcmp.right_only)
+            self._update_changed_files(dcmp.diff_files)
+        except Exception as e:
+            self._log(f"Error: {str(e)}")
+
+    def _copy_new_files(self, files):
+        for name in files:
+            src_path = os.path.join(self.source_dir, name)
+            dst_path = os.path.join(self.replica_dir, name)
             if os.path.isfile(src_path):
                 shutil.copy2(src_path, dst_path)
-                log(log_file, f"File copied: {src_path} -> {dst_path}")
+                self._log(f"File copied: {src_path} -> {dst_path}")
             else:
                 shutil.copytree(src_path, dst_path, False, None)
-                log(log_file, f"Folder copied: {src_path} -> {dst_path}")
+                self._log(f"Folder copied: {src_path} -> {dst_path}")
 
-        for name in compare.right_only:
-            path = os.path.join(replica_dir, name)
+    def _remove_extra_files(self, files):
+        for name in files:
+            path = os.path.join(self.replica_dir, name)
             if os.path.isfile(path):
                 os.remove(path)
-                log(log_file, f"File removed: {path}")
+                self._log(f"File removed: {path}")
             else:
                 shutil.rmtree(path)
-                log(log_file, f"Folder removed: {path}")
+                self._log(f"Folder removed: {path}")
 
-        for name in compare.diff_files:
-            src_path = os.path.join(source_dir, name)
-            dst_path = os.path.join(replica_dir, name)
+    def _update_changed_files(self, files):
+        for name in files:
+            src_path = os.path.join(self.source_dir, name)
+            dst_path = os.path.join(self.replica_dir, name)
             shutil.copy2(src_path, dst_path)
-            log(log_file, f"File updated: {src_path} -> {dst_path}")
+            self._log(f"File updated: {src_path} -> {dst_path}")
 
-    except Exception as e:
-        log(log_file, f"Error: {str(e)}")
+    def _log(self, message):
+        with open(self.log_file, "a") as log:
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            log.write(f"[{timestamp}] {message}\n")
+            print(message)
 
 
-def log(log_file, message):
-    with open(log_file, "a") as log:
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        log.write(f"[{timestamp}] {message}\n")
-        print(message)
+@click.command()
+@click.option('--source', required=True, prompt='Source folder')
+@click.option('--destination', required=True, prompt='Destination folder')
+@click.option('--log', required=True, prompt='Log file')
+@click.option('--interval', required=True, prompt='Sync interval', type=int)
+def main(source, destination, log, interval):
+    synchronizer = FolderSynchronizer(source, destination, log, interval)
+    while True:
+        synchronizer.synchronize()
+        time.sleep(synchronizer.interval)  # Synchronize every hour (3600 seconds)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
-        print("Usage: python sync_directories.py source_folder replica_folder log_file")
-        sys.exit(1)
-
-    source_folder = sys.argv[1]
-    replica_folder = sys.argv[2]
-    log_file = sys.argv[3]
-
-    while True:
-        synchronize_folders(source_folder, replica_folder, log_file)
-        time.sleep(3600)  # Synchronize every hour (3600 seconds)
+    main()
